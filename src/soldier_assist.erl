@@ -10,6 +10,7 @@
 -export([add_temp_task/0]).
 -export([add_move_task/0]).
 -export([get_average/0]).
+-export([get_own_average/0]).
 
 %% gen_server callbacks
 -export([init/1 ,
@@ -69,6 +70,10 @@ get_average() ->
     {ok, Set} = lasp:query({<<"accum">>, state_orset}),
     io:format("Average Movement of Soldier = ~p~n", [avg_tuple_list(sets:to_list(Set))]).
 
+get_own_average() ->
+    {ok, Set} = lasp:query({<<"accum">>, state_orset}),
+    io:format("Average Movement of Soldier for this node = ~p~n", [avg_tuple_list_own(sets:to_list(Set))]).
+
 %% Tasks
 
 temp_task(Critical_temp) ->
@@ -110,6 +115,27 @@ avg_tuple_list([H|T], Acc, Div) ->
         true -> avg_tuple_list(T, Acc - Elem, Div+1)
     end;
 avg_tuple_list([], Acc, Div) ->
+    if
+        Div > 0 -> Acc / Div;
+        true -> 0
+    end.
+
+avg_tuple_list_own(TupleList) ->
+    avg_tuple_list_own(TupleList, 0, 0).
+
+avg_tuple_list_own([H|T], Acc, Div) ->
+    Elem = element(1, H),
+    Node = element(2, H),
+    ThisNode = erlang:node(),
+    case Node of
+        ThisNode -> 
+        if
+            Elem > 0 -> avg_tuple_list_own(T, Acc + Elem, Div + 1);
+            true -> avg_tuple_list_own(T, Acc - Elem, Div + 1)
+        end;
+        Otherwise -> avg_tuple_list_own(T, Acc, Div)
+    end;
+avg_tuple_list_own([], Acc, Div) ->
     if
         Div > 0 -> Acc / Div;
         true -> 0
