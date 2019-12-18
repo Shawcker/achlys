@@ -66,16 +66,20 @@ add_move_task() ->
     gen_server:cast(?SERVER 
         , {task, movement_task(Id)}).
 
+% Displays the average of the movements of every node
 get_average() ->
     {ok, Set} = lasp:query({<<"accum">>, state_orset}),
     io:format("Average Movement of Soldier = ~p~n", [avg_tuple_list(sets:to_list(Set))]).
 
+% Displays the average of the movements of own node
 get_own_average() ->
     {ok, Set} = lasp:query({<<"accum">>, state_orset}),
     io:format("Average Movement of Soldier for this node = ~p~n", [avg_tuple_list_own(sets:to_list(Set))]).
 
 %% Tasks
 
+% Task to read temperature and displaying a message depending on
+% Whether or not it goes over the limit Critical_temp
 temp_task(Critical_temp) ->
     Task = achlys:declare(temp_task
         , all
@@ -91,6 +95,8 @@ temp_task(Critical_temp) ->
             end
     end).
 
+% Task to read values from the accelerometer
+% Adds the addition of the absolute values of the 3 measures (x, y, z) to a lasp CRDT
 movement_task(Id) ->
     Task = achlys:declare(temp_task
         , all
@@ -103,8 +109,9 @@ movement_task(Id) ->
             lasp:update(Id, {add, {add_list(Acc), Node}}, self())
     end).
 
-% Auxiliary
+%% Auxiliary
 
+% Computes the average of the first element of each tuple in the list TupleList
 avg_tuple_list(TupleList) ->
     avg_tuple_list(TupleList, 0, 0).
 
@@ -120,6 +127,8 @@ avg_tuple_list([], Acc, Div) ->
         true -> 0
     end.
 
+% Computes the average of the first element of each tuple in the list TupleList
+% As long as they come from this node (second element of each tuple)
 avg_tuple_list_own(TupleList) ->
     avg_tuple_list_own(TupleList, 0, 0).
 
@@ -141,6 +150,7 @@ avg_tuple_list_own([], Acc, Div) ->
         true -> 0
     end.
 
+% Computes the addition of every number from the list List
 add_list(List) ->
     add_list(List, 0).
 
