@@ -7,9 +7,9 @@
 %% API
 -export([start_link/0]).
 
--export([add_pmodnav_task/0]).
 -export([add_temp_task/0]).
 -export([add_move_task/0]).
+-export([get_average/0]).
 
 %% gen_server callbacks
 -export([init/1 ,
@@ -29,7 +29,6 @@ start_link() ->
     gen_server:start_link({local , ?SERVER} , ?MODULE , [] , []).
 
 init([]) ->
-    ok = temp_task(110),
     {ok , #state{}}.
 
 handle_call(_Request , _From , State) ->
@@ -59,57 +58,18 @@ code_change(_OldVsn , State , _Extra) ->
 
 add_temp_task() ->
     gen_server:cast(?SERVER 
-        , {task, temp_task(40)}).
+        , {task, temp_task(100)}).
 
 add_move_task() ->
+    {ok, {Id,_,_,_}} = lasp:declare({<<"accum">>, state_orset}, state_orset),
     gen_server:cast(?SERVER 
-        , {task, movement_task(40)}).
+        , {task, movement_task(Id)}).
 
-add_pmodnav_task() ->
-    gen_server:cast(?SERVER 
-        , {task, pmodnav_task()}).
+get_average() ->
+    {ok, Set} = lasp:query({<<"accum">>, state_orset}),
+    io:format("Average Movement of Soldier = ~p~n", [avg_tuple_list(sets:to_list(Set))]).
 
 %% Tasks
-
-schedule_task() ->
-    %% Declare an Achlys task that will be
-    %% executed exactly once
-    Task = achlys:declare(mytask
-        , all
-        , single
-        , fun() ->
-             io:format("Hello Antoine ! ~n")
-    end),
-    %% Send the task to the current server module
-    %% after a 5000ms delay
-    erlang:send_after(1000, ?SERVER, {task, Task}),
-    ok.
-
-pmodnav_task() ->
-    %% Declare an Achlys task that will be periodically
-    %% executed as long as the node is up
-    Task = achlys:declare(pmodnav_task
-        , all
-        , single
-        , fun() ->
-            logger:log(notice, "Reading PmodNAV measurements ~n"),
-            Acc = pmod_nav:read(acc, [out_x_xl, out_y_xl, out_z_xl]),
-            Gyro = pmod_nav:read(acc, [out_x_g, out_y_g, out_z_g]),
-            Mag = pmod_nav:read(mag, [out_x_m, out_y_m, out_z_m]),
-            Press = pmod_nav:read(alt, [press_out]),
-            Temp = pmod_nav:read(alt, [temp_out]),
-            Node = erlang:node(),
-
-            F = fun({Acc, Gyro, Mag, Press, Temp, Node}) ->
-                    [T] = Temp,
-                    NewTemp = ((T * 1.8) + 32),
-                    {Acc, Gyro, Mag, Press, [NewTemp], Node}
-            end,
-            {ok, {SourceId, _, _, _}} = lasp:declare({<<"source">>, state_orset}, state_orset),
-            {ok, {DestinationId, _, _, _}} = lasp:declare({<<"destination">>, state_orset}, state_orset),
-            lasp:map(SourceId, F, DestinationId),
-            lasp:update(SourceId, {add, {Acc, Gyro, Mag, Press, Temp, Node}}, self())
-    end).
 
 temp_task(Critical_temp) ->
     Task = achlys:declare(temp_task
@@ -124,31 +84,44 @@ temp_task(Critical_temp) ->
                 hd(Temp) > Critical_temp -> io:format("It's too hot ! Stop firing. ~n");
                 true -> io:format("Everything is ok ! ~n")
             end
-    end),
-    erlang:send(?SERVER, {task, Task}),
-    ok.
+    end).
 
-movement_task(Minimum_movement) ->
+movement_task(Id) ->
     Task = achlys:declare(temp_task
         , all
         , permanent
         , fun() ->
             logger:log(notice, "Reading PmodNAV accelerometer measurements ~n"),
             Acc = pmod_nav:read(acc, [out_x_xl, out_y_xl, out_z_xl]),
-            Node = erlang:node()
-    end),
-    erlang:send(?SERVER, {task, Task}),
-    ok.
+            Node = erlang:node(),
+
+            lasp:update(Id, {add, {add_list(Acc), Node}}, self())
+    end).
 
 % Auxiliary
 
-display_results(Where) ->
-    io:format("Displaying results from "),
-    case Where of
-        src ->  io:format("source ~n"),
-                {ok, Set} = lasp:query({<<"temp_src">>, state_orset}), sets:to_list(Set),
-                io:format(Set);
-        dest -> io:format("destination ~n"),
-                {ok, Set} = lasp:query({<<"temp_dest">>, state_orset}), sets:to_list(Set),
-                io:format(Set)
+avg_tuple_list(TupleList) ->
+    avg_tuple_list(TupleList, 0, 0).
+
+avg_tuple_list([H|T], Acc, Div) ->
+    Elem = element(1, H),
+    if
+        Elem > 0 -> avg_tuple_list(T, Acc + Elem, Div+1);
+        true -> avg_tuple_list(T, Acc - Elem, Div+1)
+    end;
+avg_tuple_list([], Acc, Div) ->
+    if
+        Div > 0 -> Acc / Div;
+        true -> 0
     end.
+
+add_list(List) ->
+    add_list(List, 0).
+
+add_list([H|T], Acc) ->
+    if
+        H > 0 -> add_list(T, Acc + H);
+        true -> add_list(T, Acc - H)
+    end;
+add_list([], Acc) ->
+    Acc.
